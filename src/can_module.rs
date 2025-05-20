@@ -93,10 +93,10 @@ impl CanModule {
                                 .expect("Frame creation failed");
 
                             // 异步发送（使用spawn_blocking避免阻塞）
-                            // let s = Arc::clone(&socket);
+                            let s = Arc::clone(&socket);
                             tokio::task::spawn_blocking(move || {
-                                // s.blocking_lock().write_frame(&frame)
-                                //     .expect("Frame write failed");
+                                s.blocking_lock().write_frame(&frame)
+                                    .expect("Frame write failed");
                                 println!("Sent:{:?} {:?}", Instant::now(),frame)
                             }).await.unwrap();
 
@@ -114,10 +114,10 @@ impl CanModule {
                         let frame = CanFrame::new(id, &msg.data)
                             .expect("Frame creation failed");
 
-                        // let s = Arc::clone(&socket);
+                        let s = Arc::clone(&socket);
                         tokio::task::spawn_blocking(move || {
-                            // s.blocking_lock().write_frame(&frame)
-                            //     .expect("Frame write failed");
+                            s.blocking_lock().write_frame(&frame)
+                                .expect("Frame write failed");
                             println!("Sent:{:?} {:?}", Instant::now(),frame)
                         }).await.unwrap();
                     }
@@ -469,7 +469,7 @@ fn bytearray_to_binary_string(bytes: &[u8]) -> String {
     //byte数组转换为二进制字符串
     bytes.iter().map(|byte| format!("{:08b}", byte)).collect::<Vec<_>>().join("")
 }
-async fn start() -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) async fn start() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化CAN模块
     let can = CanModule::new("can0")?;
 
