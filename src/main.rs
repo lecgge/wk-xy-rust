@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // // println!("Parsed JSON:\n{:#?}", data);
     // let v: HashMap<String,Vec<Frame>> = serde_json::from_str(&data)?;
     // println!("{:?}", can_matrix);
-    can_module::start().await.expect("发送消息报错");
+    can_module::start(can_matrix).await.expect("发送消息报错");
     Ok(())
 }
 
