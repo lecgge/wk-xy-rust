@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use socketcan::{CanSocket, CanFrame, EmbeddedFrame, StandardId, Socket};
 use tokio::sync::{Mutex, mpsc};
+use crate::arxml_bean::arxml_bean::Frame;
 
 /// CAN消息结构体
 #[derive(Debug, Clone)]
@@ -191,7 +192,130 @@ impl Drop for CanModule {
     }
 }
 
+impl Frame {
+    pub fn decode(&self, data: &[u8]) -> Option<HashMap<String, f32>>{
+        let mut values: HashMap<String, f32> = HashMap::new();
+        if let Some(is_pdu_container) =  self.is_pdu_container{
+            if is_pdu_container {
+                let mut index = 0;
+                while index + 4 <= data.len() {
+                    // 读取 3 字节 PDU ID（需处理不足 3 字节的情况）
+                    let id_bytes: [u8; 3] = data[index..index+3]
+                        .try_into()
+                        .map_err(|_| "Invalid ID bytes").unwrap();
+                    let pdu_id = u32::from_be_bytes([0u8,id_bytes[0],id_bytes[1],id_bytes[2]]);
 
+                    // 读取 1 字节大小
+                    let pdu_size = data[index + 3];
+
+                    // 更新索引
+                    index += 4;
+
+                    // 检查数据是否完整
+                    if index + pdu_size as usize > data.len() {
+                        return Some(HashMap::new());
+                    }
+
+                    // 获取 PDU 数据
+                    let pdu_data = &data[index..index + pdu_size as usize];
+                    let pdu_data_str = bytearray_to_binary_string(pdu_data);
+
+                    // 解析并合并结果
+                    let massgae = self.unpack_pdu(&pdu_id, &pdu_data_str).unwrap();
+                    values.extend(massgae);
+
+                    // 移动索引
+                    index += pdu_size as usize;
+                }
+            } else {
+                if let Some(signals) = self.signals.as_ref() {
+                    let binary_data = bytearray_to_binary_string(data);
+                    let mut decoded: HashMap<String, f32> = HashMap::new();
+                    for signal in signals {
+                        // 检查边界条件
+                        // 修改unpack_pdu方法中的索引逻辑
+                        let start_bit = signal.start_bit.unwrap() as usize;
+                        let size = signal.size.unwrap() as usize;
+
+                        // 检查边界条件（使用转换后的usize类型）
+                        if start_bit + size > binary_data.len() {
+                            return None;
+                        }
+
+                        // 使用转换后的usize类型进行索引
+                        let bits = &binary_data[start_bit..start_bit + size];
+
+                        // 验证二进制格式
+                        if bits.chars().any(|c| c != '0' && c != '1') {
+                            return None;
+                        }
+
+                        // 转换为整数
+                        let value = i32::from_str_radix(bits, 2).map_err(|e| {
+                            PduError::InvalidBinaryString(e.to_string())
+                        }).unwrap();
+
+                        decoded.insert(signal.name.clone().unwrap(), value as f32);
+
+                    }
+                    values.extend(decoded);
+                }
+            }
+        }
+        Some(values)
+    }
+
+    pub fn unpack_pdu(&self, pdu_id: &u32, data: &String) -> Option<HashMap<String, f32>> {
+        let mut decoded: HashMap<String, f32> = HashMap::new();
+        if let Some(ref pdus) = self.pdus{
+            let pdu = pdus.iter().find(|p| p.id == Some(*pdu_id as i32));
+            if let Some(ref signals) = pdu?.signals {
+                for signal in signals {
+                    // 检查边界条件
+                    // 修改unpack_pdu方法中的索引逻辑
+                    let start_bit = signal.start_bit.unwrap() as usize;
+                    let size = signal.size.unwrap() as usize;
+
+                    // 检查边界条件（使用转换后的usize类型）
+                    if start_bit + size > data.len() {
+                        return None;
+                    }
+
+                    // 使用转换后的usize类型进行索引
+                    let bits = &data[start_bit..start_bit + size];
+
+                    // 验证二进制格式
+                    if bits.chars().any(|c| c != '0' && c != '1') {
+                        return None;
+                    }
+
+                    // 转换为整数
+                    let value = i32::from_str_radix(bits, 2).map_err(|e| {
+                        PduError::InvalidBinaryString(e.to_string())
+                    }).unwrap();
+
+                    decoded.insert(signal.name.clone().unwrap(), value as f32);
+                }
+
+            }
+
+        }
+
+
+        Some(decoded)
+    }
+}
+
+// 新增错误类型定义
+#[derive(Debug)]
+enum PduError {
+    BitOutOfRange,
+    InvalidBinaryString(String),
+}
+fn bytearray_to_binary_string(bytes: &[u8]) -> String {
+    //byte数组转换为二进制字符串
+    bytes.iter().map(|byte| format!("{:08b}", byte)).collect::<Vec<_>>().join("")
+}
 async fn start() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化CAN模块
     let can = CanModule::new("can0")?;
