@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use arxml_bean::arxml_bean::{Frame, Root};
+use crate::can_module::CanModule;
 
 mod arxml_bean;
 mod can_module;
@@ -16,7 +17,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let data = fs::read_to_string("./resource/output.json")?;
     // // println!("Parsed JSON:\n{:#?}", data);
     // let v: HashMap<String,Vec<Frame>> = serde_json::from_str(&data)?;
-    println!("{:?}", can_matrix);
+    // println!("{:?}", can_matrix);
+    can_module::start().await.expect("发送消息报错");
     Ok(())
 }
 

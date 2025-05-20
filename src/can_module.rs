@@ -469,7 +469,7 @@ fn bytearray_to_binary_string(bytes: &[u8]) -> String {
     //byte数组转换为二进制字符串
     bytes.iter().map(|byte| format!("{:08b}", byte)).collect::<Vec<_>>().join("")
 }
-async fn start() -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) async fn start() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化CAN模块
     let can = CanModule::new("can0")?;
 
