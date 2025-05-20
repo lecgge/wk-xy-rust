@@ -31,6 +31,17 @@ pub mod arxml_bean{
 
 		pub signals: Option<Vec<Signal>>,
 	}
+	
+	impl Frame {
+		pub fn pdu_by_id(&self, id: i32) -> Option<&Pdu> {
+			for pdu in self.pdus.as_ref().unwrap() {
+				if pdu.id.unwrap() == id {
+					return Some(pdu);
+				}
+			}
+			None
+		}	
+	}
 
 
 	#[derive(Serialize, Deserialize, Debug, Clone)]

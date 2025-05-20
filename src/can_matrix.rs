@@ -21,6 +21,10 @@ impl CanMatrix {
         }
     }
     
+    pub fn get_message_by_signals(&self, frame_id: i32, signals: HashMap<String, f32>) -> Option<Vec<u8>> {
+        let frame = self.frames_by_id.get(&frame_id).unwrap();
+        frame.encode(signals)
+    }
     
     pub fn get_signals_by_message(&self, frame_id: i32, data: &[u8]) -> Option<HashMap<String, f32>>{
         let frame = self.frames_by_id.get(&frame_id).unwrap();

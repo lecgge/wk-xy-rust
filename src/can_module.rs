@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use socketcan::{CanSocket, CanFrame, EmbeddedFrame, StandardId, Socket};
 use tokio::sync::{Mutex, mpsc};
-use crate::arxml_bean::arxml_bean::Frame;
+use crate::arxml_bean::arxml_bean::{Frame, Pdu};
 
 /// CAN消息结构体
 #[derive(Debug, Clone)]
@@ -303,6 +303,159 @@ impl Frame {
 
 
         Some(decoded)
+    }
+    
+    pub fn encode(&self, data: HashMap<String, f32>) -> Option<Vec<u8>>{
+        if self.is_pdu_container? {
+            let mut new_data = Vec::new();
+            let mut target_pdus: HashMap<i32, Vec<(String, f32)>> = HashMap::new();
+
+            // 遍历输入信号组，判断每个信号应该被分配到哪个PDU中
+            for (signal_name, value) in data {
+                for pdu in self.pdus.as_ref().unwrap() {
+                    for pdu_signal in pdu.signals.as_ref().unwrap() {
+                        if pdu_signal.name.as_deref().unwrap() == signal_name.as_str() {
+                            target_pdus
+                                .entry(pdu.id.unwrap())
+                                .or_insert_with(Vec::new)
+                                .push((signal_name.clone(), value));
+                        }
+                    }
+                }
+            }
+
+            // 打印target_pdus，调试用
+            println!("{:?}", target_pdus);
+
+            for pdu_id in target_pdus.keys() {
+                if let Some(pdu) = self.pdu_by_id(*pdu_id) {
+                    let pdu_data = self.encode_pdu_signals(pdu, &target_pdus[pdu_id]);
+                    new_data.extend(pdu_data);
+                }
+            }
+
+            Some(new_data)
+        } else {
+            // 初始化数据缓冲区 [报文长度]
+            let mut bit_buffer = vec!['0'; self.length.unwrap() as usize * 8];
+            for signal in self.signals.as_ref().unwrap(){
+                if !data.contains_key(signal.name.as_ref().unwrap().as_str()){
+                    continue
+                }
+                let start_bit = signal.start_bit.unwrap() as usize;
+                let bit_size = signal.size.unwrap() as usize;
+
+                // 2. 转换为二进制字符串（左补零）
+                // 注意：实际应根据信号类型处理浮点数到整数的转换
+                let value_int = data[signal.name.as_ref().unwrap().as_str()] as u64; // 浮点数四舍五入转换
+                let bin_str = format!("{:0>1$b}", value_int, bit_size);
+
+                // 3. 验证边界条件
+                if start_bit + bit_size > self.length.unwrap() as usize {
+                    eprintln!("Signal {} out of bounds", signal.name.as_ref().unwrap());
+                    continue;
+                }
+
+                // 4. 将二进制字符串写入位缓冲区
+                for (i, ch) in bin_str.chars().enumerate() {
+                    if start_bit + i < self.length.unwrap() as usize {
+                        bit_buffer[start_bit + i] = ch;
+                    }
+                }
+            }
+            // 将位缓冲区转换为字节数组（大端格式）
+            let data_buffer: Vec<u8> = (0..self.length.unwrap() as usize)
+                .map(|i| {
+                    let start = i * 8;
+                    let end = start + 8;
+                    if end > self.length.unwrap() as usize * 8 {
+                        return 0;
+                    }
+
+                    let mut byte = 0u8;
+                    for (j, &bit) in bit_buffer[start..end].iter().enumerate() {
+                        if bit == '1' {
+                            byte |= 1 << (7 - j); // 从高位开始填充
+                        }
+                    }
+                    byte
+                })
+                .collect();
+            Some(data_buffer)
+        }
+    }
+    
+    pub fn encode_pdu_signals(&self, pdu: &Pdu, signals: &Vec<(String, f32)>) -> Vec<u8> {
+        // 获取PDU数据长度（字节）
+        let pdu_size = pdu.size.unwrap() as usize;
+
+        // 初始化数据缓冲区 [ID(3字节)][Size(1字节)][Payload(pdu_size字节)]
+        let mut data = vec![0u8; 4 + pdu_size];
+
+        // 填充PDU ID（3字节大端格式）
+        let id_bytes = pdu.id.unwrap().to_be_bytes(); // u32转为大端字节序
+        data[0] = id_bytes[1]; // 取后3字节
+        data[1] = id_bytes[2];
+        data[2] = id_bytes[3];
+
+        // 填充PDU长度（单字节）
+        data[3] = pdu.size.unwrap() as u8;
+
+        // 构建原始位字符串（初始化为全0）
+        let bit_length = pdu_size * 8;
+        let mut bit_buffer = vec!['0'; bit_length];
+
+        // 处理每个待编码信号
+        for (signal_name, value) in signals {
+            // 1. 查找信号定义
+            if let Some(signal) = pdu.signals.as_ref().and_then(|signals| {
+                signals.iter().find(|s| s.name.as_deref() == Some(signal_name.as_str()))
+            }) {
+                let start_bit = signal.start_bit.unwrap() as usize;
+                let bit_size = signal.size.unwrap() as usize;
+
+                // 2. 转换为二进制字符串（左补零）
+                // 注意：实际应根据信号类型处理浮点数到整数的转换
+                let value_int = *value as u64; // 浮点数四舍五入转换
+                let bin_str = format!("{:0>1$b}", value_int, bit_size);
+
+                // 3. 验证边界条件
+                if start_bit + bit_size > bit_length {
+                    eprintln!("Signal {} out of bounds", signal_name);
+                    continue;
+                }
+
+                // 4. 将二进制字符串写入位缓冲区
+                for (i, ch) in bin_str.chars().enumerate() {
+                    if start_bit + i < bit_length {
+                        bit_buffer[start_bit + i] = ch;
+                    }
+                }
+            }
+        }
+
+        // 将位缓冲区转换为字节数组（大端格式）
+        let byte_data: Vec<u8> = (0..bit_length/8)
+            .map(|i| {
+                let start = i * 8;
+                let end = start + 8;
+                if end > bit_length {
+                    return 0;
+                }
+
+                let mut byte = 0u8;
+                for (j, &bit) in bit_buffer[start..end].iter().enumerate() {
+                    if bit == '1' {
+                        byte |= 1 << (7 - j); // 从高位开始填充
+                    }
+                }
+                byte
+            })
+            .collect();
+
+        // 将有效载荷复制到输出缓冲区
+        data[4..].copy_from_slice(&byte_data);
+        data
     }
 }
 
