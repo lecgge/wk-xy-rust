@@ -115,7 +115,7 @@ impl CanModule {
                                     println!("Sent:{:?} {:?}", Instant::now(),frame)
                                 }).await.unwrap();
                             }
-                            
+
                             // 更新下次发送时间
                             msg.next_send_time = Some(now + Duration::from_millis(msg.period_ms as u64));
                         }
@@ -242,8 +242,8 @@ pub(crate) async fn start(can_matrix: CanMatrix) -> Result<(), Box<dyn std::erro
         message.period_ms = 100;
         can.add_periodic_message(message).await;
     }
-    
-    
+
+
     // 发送单次消息
     can.send_once(CanMessage {
         id: 0x201,
