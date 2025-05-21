@@ -1,7 +1,7 @@
 use crate::arxml_bean::arxml_bean::{Frame, Pdu};
 use crate::can_matrix;
 use crate::can_matrix::CanMatrix;
-use socketcan::{CanFrame, CanSocket, EmbeddedFrame, Socket, StandardId};
+use socketcan::{CanFrame, CanSocket, EmbeddedFrame, Socket, StandardId, CanFdSocket, CanFdFrame};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,8 +17,9 @@ pub struct CanMessage {
     pub data: Vec<u8>,
     /// 发送周期（毫秒），-1表示单次发送
     pub period_ms: i64,
+    pub is_fd:bool,
     /// 下次发送时间（内部维护）
-    next_send_time: Option<Instant>,
+    pub next_send_time: Option<Instant>,
 }
 
 /// CAN总线管理模块
@@ -37,7 +38,7 @@ impl CanModule {
     /// - interface: 接口名，如"can0"
     pub fn new(interface: &str) -> Result<Self, socketcan::Error> {
         // 初始化CAN套接字（非阻塞模式）
-        let socket = CanSocket::open(interface)?;
+        let socket = CanFdSocket::open(interface)?;
         socket.set_nonblocking(true)?;
         let socket = Arc::new(Mutex::new(socket));
 
@@ -71,7 +72,7 @@ impl CanModule {
 
     /// 异步发送任务主循环
     async fn send_task(
-        socket: Arc<Mutex<CanSocket>>,
+        socket: Arc<Mutex<CanFdSocket>>,
         periodic: Arc<Mutex<HashMap<u32, CanMessage>>>,
         mut single_shot_rx: mpsc::Receiver<CanMessage>,
         stop_signal: Arc<AtomicBool>,
@@ -91,17 +92,30 @@ impl CanModule {
                             // 构造CAN帧
                             let id = StandardId::new(msg.id as u16)
                                 .expect("Invalid CAN ID");
-                            let frame = CanFrame::new(id, &msg.data)
+                            if msg.is_fd{
+                                let mut frame = CanFdFrame::new(id, &msg.data)
                                 .expect("Frame creation failed");
-
-                            // 异步发送（使用spawn_blocking避免阻塞）
-                            let s = Arc::clone(&socket);
-                            tokio::task::spawn_blocking(move || {
-                                s.blocking_lock().write_frame(&frame)
-                                    .expect("Frame write failed");
-                                println!("Sent:{:?} {:?}", Instant::now(),frame)
-                            }).await.unwrap();
-
+                                frame.set_brs(true);
+                                frame.set_esi(false);
+                                // 异步发送（使用spawn_blocking避免阻塞）
+                                let s = Arc::clone(&socket);
+                                tokio::task::spawn_blocking(move || {
+                                    s.blocking_lock().write_frame(&frame)
+                                        .expect("Frame write failed");
+                                    println!("Sent:{:?} {:?}", Instant::now(),frame)
+                                }).await.unwrap();
+                            } else {
+                                let frame = CanFrame::new(id, &msg.data)
+                                .expect("Frame creation failed");
+                                // 异步发送（使用spawn_blocking避免阻塞）
+                                let s = Arc::clone(&socket);
+                                tokio::task::spawn_blocking(move || {
+                                    s.blocking_lock().write_frame(&frame)
+                                        .expect("Frame write failed");
+                                    println!("Sent:{:?} {:?}", Instant::now(),frame)
+                                }).await.unwrap();
+                            }
+                            
                             // 更新下次发送时间
                             msg.next_send_time = Some(now + Duration::from_millis(msg.period_ms as u64));
                         }
@@ -136,7 +150,7 @@ impl CanModule {
     }
 
     /// 异步接收任务主循环
-    async fn receive_task(socket: Arc<Mutex<CanSocket>>, stop_signal: Arc<AtomicBool>) {
+    async fn receive_task(socket: Arc<Mutex<CanFdSocket>>, stop_signal: Arc<AtomicBool>) {
         let mut interval = tokio::time::interval(Duration::from_millis(10));
 
         loop {
@@ -197,7 +211,7 @@ impl Drop for CanModule {
 
 pub(crate) async fn start(can_matrix: CanMatrix) -> Result<(), Box<dyn std::error::Error>> {
     // 初始化CAN模块
-    let can = CanModule::new("can0")?;
+    let can = CanModule::new("vcan0")?;
     let message = can_matrix.get_message_by_signals(
         0x4D2,
         HashMap::from([("isHADS_NM_BSMtoRMS".to_string(), 1.0f32),
@@ -206,20 +220,15 @@ pub(crate) async fn start(can_matrix: CanMatrix) -> Result<(), Box<dyn std::erro
         ]),
     );
     println!("------------{:?}", message);
-    let signals = can_matrix.get_signals_by_message(0x4D2, message.as_ref().unwrap());
+    // let signals = can_matrix.get_signals_by_message(0x4D2, &*message.as_ref().unwrap().data);
     // 添加周期消息（100ms周期）
-    can.add_periodic_message(CanMessage {
-        id: 0x4D2,
-        data: message.unwrap(),
-        period_ms: 100,
-        next_send_time: None,
-    })
-    .await;
+    can.add_periodic_message(message.unwrap()).await;
 
     // 发送单次消息
     can.send_once(CanMessage {
         id: 0x201,
         data: vec![0xFF],
+        is_fd:true,
         period_ms: -1,
         next_send_time: None,
     })
