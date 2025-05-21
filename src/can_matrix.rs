@@ -21,7 +21,13 @@ impl CanMatrix {
     pub fn get_message_by_signals(&self,cluster_name:String, frame_id: i32, signals: HashMap<String, f32>) -> Option<CanMessage> {
         let cluster = self.clusters.get(&cluster_name).unwrap();
         let frame = cluster.frame_by_id.get(&frame_id).unwrap();
-        let data = frame.encode(signals).unwrap();
+        let mut data = frame.encode(signals).unwrap();
+        //如果data长度小于frame的长度，则填充0
+        if data.len() < frame.length.unwrap() as usize {
+            let mut new_data = data.to_vec();
+            new_data.resize(frame.length.unwrap() as usize, 0);
+            data = new_data;
+        }
         Some(CanMessage {
             id: frame_id as u32,
             data,
