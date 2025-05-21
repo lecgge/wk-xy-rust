@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 use crate::arxml_bean::arxml_bean::{Frame, Signal};
+use crate::can_module::CanMessage;
 
 #[derive(Debug, Clone)]
 pub struct CanMatrix {
@@ -21,9 +22,16 @@ impl CanMatrix {
         }
     }
     
-    pub fn get_message_by_signals(&self, frame_id: i32, signals: HashMap<String, f32>) -> Option<Vec<u8>> {
+    pub fn get_message_by_signals(&self, frame_id: i32, signals: HashMap<String, f32>) -> Option<CanMessage> {
         let frame = self.frames_by_id.get(&frame_id).unwrap();
-        frame.encode(signals)
+        let data = frame.encode(signals).unwrap();
+        Some(CanMessage {
+            id: frame_id as u32,
+            data,
+            period_ms: frame.cycle_time.unwrap() as i64,
+            is_fd: frame.is_fd?,
+            next_send_time: None,
+        })
     }
     
     pub fn get_signals_by_message(&self, frame_id: i32, data: &[u8]) -> Option<HashMap<String, f32>>{
