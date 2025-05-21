@@ -95,8 +95,9 @@ impl CanModule {
                             if msg.is_fd{
                                 let mut frame = CanFdFrame::new(id, &msg.data)
                                 .expect("Frame creation failed");
+                                
                                 frame.set_brs(true);
-                                frame.set_esi(false);
+                                //frame.set_esi(false);
                                 // 异步发送（使用spawn_blocking避免阻塞）
                                 let s = Arc::clone(&socket);
                                 tokio::task::spawn_blocking(move || {
@@ -131,7 +132,7 @@ impl CanModule {
                                 let mut frame = CanFdFrame::new(id, &msg.data)
                                 .expect("Frame creation failed");
                                 frame.set_brs(true);
-                                frame.set_esi(false);
+                                //frame.set_esi(false);
                                 // 异步发送（使用spawn_blocking避免阻塞）
                                 let s = Arc::clone(&socket);
                                 tokio::task::spawn_blocking(move || {
@@ -229,12 +230,18 @@ pub(crate) async fn start(can_matrix: CanMatrix) -> Result<(), Box<dyn std::erro
     // 初始化CAN模块
     let can = CanModule::new("vcan0")?;
     let mut message = can_matrix.get_message_by_signals(
-        0x4D2,
-        HashMap::from([("isHADS_NM_BSMtoRMS".to_string(), 1.0f32),
-            ("isHADS_NM_RSStoRMS".to_string(), 1.0f32),
-            ("isHADS_NM_NOSSta".to_string(), 1.0f32),
+        String::from("ADCANFD"),
+        451,
+        HashMap::from([
+            ("isAutocTrGearShftDircn_0".to_string(),1.0f32),
+            ("isAutocTrGearShftDircnF_0".to_string(),1.0f32),
+            ("isDrvlnToqStabSts_0".to_string(),1.0f32),
+            ("isTCM_025ms_PDU03_RC_0".to_string(),1.0f32),
         ]),
     );
+    // ("isHADS_NM_BSMtoRMS".to_string(), 1.0f32),
+    // ("isHADS_NM_RSStoRMS".to_string(), 1.0f32),
+    // ("isHADS_NM_NOSSta".to_string(), 1.0f32),
     println!("------------{:?}", message);
     // let signals = can_matrix.get_signals_by_message(0x4D2, &*message.as_ref().unwrap().data);
     // 添加周期消息（100ms周期）

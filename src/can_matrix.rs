@@ -1,29 +1,26 @@
 use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
-use crate::arxml_bean::arxml_bean::{Frame, Signal};
+use crate::arxml_bean::arxml_bean::{Cluster, Frame, Signal};
 use crate::can_module::CanMessage;
 
 #[derive(Debug, Clone)]
 pub struct CanMatrix {
-    pub clusters: HashMap<String, Vec<Frame>>,
-    pub frames_by_id: HashMap<i32, Frame>,
-    pub frames_by_name: HashMap<String, Frame>,
-    pub signals: HashMap<String, Signal>,
+    pub clusters: HashMap<String, Cluster>,
+    pub signals: Vec<Signal>,
 }
 
 impl CanMatrix {
     pub fn new() -> Self {
         Self {
             clusters: HashMap::new(),
-            frames_by_id: HashMap::new(),
-            frames_by_name: HashMap::new(),
-            signals: HashMap::new(),
+            signals: Vec::new(),
         }
     }
     
-    pub fn get_message_by_signals(&self, frame_id: i32, signals: HashMap<String, f32>) -> Option<CanMessage> {
-        let frame = self.frames_by_id.get(&frame_id).unwrap();
+    pub fn get_message_by_signals(&self,cluster_name:String, frame_id: i32, signals: HashMap<String, f32>) -> Option<CanMessage> {
+        let cluster = self.clusters.get(&cluster_name).unwrap();
+        let frame = cluster.frame_by_id.get(&frame_id).unwrap();
         let data = frame.encode(signals).unwrap();
         Some(CanMessage {
             id: frame_id as u32,
@@ -34,8 +31,9 @@ impl CanMatrix {
         })
     }
     
-    pub fn get_signals_by_message(&self, frame_id: i32, data: &[u8]) -> Option<HashMap<String, f32>>{
-        let frame = self.frames_by_id.get(&frame_id).unwrap();
+    pub fn get_signals_by_message(&self,cluster_name:String, frame_id: i32, data: &[u8]) -> Option<HashMap<String, f32>>{
+        let cluster = self.clusters.get(&cluster_name).unwrap();
+        let frame = cluster.frame_by_id.get(&frame_id).unwrap();
         frame.decode(data)
     }
     
@@ -47,24 +45,10 @@ impl CanMatrix {
         // ...
         let data = fs::read_to_string(arxml_file)?;
         let v: HashMap<String,Vec<Frame>> = serde_json::from_str(&data)?;
-        self.clusters = v;
-        for (cluster_name, frames) in self.clusters.iter_mut() {
-            for frame in frames.iter_mut() {
-                if let Some(id) = frame.id {
-                    self.frames_by_id.insert(id, frame.clone());
-                }
-                if let Some(name) = frame.name.clone() {
-                    self.frames_by_name.insert(name, frame.clone());
-                }
-                let mut signals = frame.signals.clone().unwrap();
-                if signals.is_empty()  {
-                    continue;
-                } else { 
-                    for signal in signals.iter_mut() {
-                        self.signals.insert(signal.name.clone().unwrap(), signal.clone());
-                    }
-                }
-            }
+
+        self.clusters = HashMap::new();
+        for x in v {
+            self.clusters.insert(x.0.clone(), Cluster::new(x.0.clone(), x.1));
         }
         Ok(())
     }
